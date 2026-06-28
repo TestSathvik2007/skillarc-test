@@ -1,0 +1,59 @@
+import { createSupabaseServerClient } from "@/lib/supabase-server"
+import { redirect } from "next/navigation"
+import { SectionsClientPage } from "./sections-client"
+import { ROLES } from "@/constants/roles"
+
+export default async function SectionsPage() {
+  const supabase = await createSupabaseServerClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect("/auth/login")
+
+  const { data: userProfile } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", user.id)
+    .single()
+
+  if (userProfile?.role !== ROLES.INSTITUTION_ADMIN) redirect("/dashboard")
+
+  const institutionId = userProfile.institution_id
+
+  const { data: sections = [] } = await supabase
+    .from("sections")
+    .select(`
+      *,
+      faculty_advisor:faculty_advisor_id(
+        id,
+        name,
+        email
+      ),
+      program:program_id(
+        id,
+        name
+      )
+    `)
+    .eq("institution_id", institutionId)
+    .order("semester", { ascending: true })
+    .order("name", { ascending: true })
+
+  const { data: programs = [] } = await supabase
+    .from("programs")
+    .select("id, name, departments(id)")
+    .eq("departments.institution_id", institutionId)
+
+  const { data: faculty = [] } = await supabase
+    .from("users")
+    .select("id, name, email")
+    .eq("institution_id", institutionId)
+    .eq("role", ROLES.FACULTY)
+
+  return (
+    <SectionsClientPage
+      initialSections={sections || []}
+      programs={programs || []}
+      facultyAdvisors={faculty || []}
+      institutionId={institutionId}
+    />
+  )
+}

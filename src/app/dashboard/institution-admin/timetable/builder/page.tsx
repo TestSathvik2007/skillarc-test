@@ -1,12 +1,14 @@
 "use client"
 
 import { useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors } from "@dnd-kit/core"
 import { TimetableProvider, useTimetable } from "@/modules/timetable/context/timetable-context"
 import SubjectPanel from "@/modules/timetable/components/subject-panel"
 import TimetableGrid from "@/modules/timetable/components/timetable-grid"
 import FacultyPanel from "@/modules/timetable/components/faculty-panel"
-import { supabase } from "@/lib/supabase"
+import { timetableService } from "@/modules/timetable/services/timetableService"
+import { Subject } from "@/modules/timetable/types/timetable.types"
 
 const DRAG_COLORS: Record<string, { bg: string; border: string; text: string }> = {
   DAA:    { bg: "#dbeafe", border: "#bfdbfe", text: "#1d4ed8" },
@@ -19,29 +21,30 @@ const DRAG_COLORS: Record<string, { bg: string; border: string; text: string }> 
 }
 const DEFAULT_DRAG = { bg: "#dbeafe", border: "#bfdbfe", text: "#1d4ed8" }
 
-function DragPreview({ subject }: { subject: any }) {
+function DragPreview({ subject }: { subject: Subject }) {
   const c = DRAG_COLORS[subject.code] ?? DEFAULT_DRAG
   return (
     <div style={{
-      backgroundColor: c.bg,
-      border: `1px solid ${c.border}`,
-      borderRadius: 12,
-      padding: "10px 12px",
-      width: 176,
-      boxShadow: "0 20px 40px rgba(0,0,0,0.15)",
-      transform: "rotate(2deg)",
+      backgroundColor: c.bg, border: `1px solid ${c.border}`,
+      borderRadius: 12, padding: "10px 12px", width: 176,
+      boxShadow: "0 20px 40px rgba(0,0,0,0.15)", transform: "rotate(2deg)",
       fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
     }}>
       <p style={{ fontWeight: 700, fontSize: 12, color: c.text }}>{subject.code}</p>
       <p style={{ fontSize: 10, color: "#6b7280", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{subject.name}</p>
-      <p style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{subject.faculty}</p>
+      <p style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{subject.faculty_name}</p>
     </div>
   )
 }
 
 function Builder() {
   const { assignSubject } = useTimetable()
-  const [activeSubject, setActiveSubject] = useState<any>(null)
+  const searchParams = useSearchParams()
+
+  const semester = searchParams.get("semester")
+  const sectionId = searchParams.get("section")
+
+  const [activeSubject, setActiveSubject] = useState<Subject | null>(null)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -50,29 +53,35 @@ function Builder() {
   return (
     <DndContext
       sensors={sensors}
-      onDragStart={(e) => setActiveSubject(e.active.data.current)}
+      onDragStart={(e) => setActiveSubject(e.active.data.current as Subject)}
       onDragEnd={async (e) => {
         setActiveSubject(null)
-
         if (!e.over) return
 
-        const subject = e.active.data.current
+        const subject = e.active.data.current as Subject
         const [day, period] = (e.over.id as string).split("-")
 
-        // Update UI state immediately
+        if (!subject?.id) {
+          console.error("Missing subject.id", subject)
+          return
+        }
+
+        const institutionId = await timetableService.getCurrentInstitutionId()
+
         assignSubject(day, period, subject)
 
-        // Persist to Supabase
-        const { error } = await supabase.from("timetable_slots").insert({
-          institution_id: "demo-institution-id",
-          day,
-          period: Number(period),
-          subject_id: subject.id,
-          teacher_id: subject.teacher_id,
-        })
-
-        if (error) {
-          console.error("Failed to save timetable slot:", error.message)
+        try {
+          await timetableService.saveSlot({
+            institutionId,
+            sectionId: sectionId!,
+            semester: Number(semester),
+            day,
+            period: Number(period.replace("P", "")),
+            subjectId: subject.id,
+            facultyId: subject.faculty_id,
+          })
+        } catch (err) {
+          console.error(err)
         }
       }}
       onDragCancel={() => setActiveSubject(null)}
@@ -80,8 +89,7 @@ function Builder() {
       <div style={{
         display: "grid",
         gridTemplateColumns: "272px 1fr 272px",
-        gap: 16,
-        alignItems: "start",
+        gap: 16, alignItems: "start",
       }}>
         <SubjectPanel />
         <TimetableGrid />
@@ -96,20 +104,49 @@ function Builder() {
 }
 
 export default function TimetableBuilderPage() {
+  const searchParams = useSearchParams()
+
+  const programId = searchParams.get("program")
+  const semester = searchParams.get("semester")
+  const sectionId = searchParams.get("section")
+
   return (
-    <TimetableProvider>
-      <div style={{
-        minHeight: "100vh",
-        backgroundColor: "#f4f5f7",
-        padding: 24,
-        fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
-      }}>
+    <TimetableProvider
+      semester={semester}
+      sectionId={sectionId}
+    >
+      <div
+        style={{
+          minHeight: "100vh",
+          backgroundColor: "#f4f5f7",
+          padding: 24,
+          fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
+        }}
+      >
         <div style={{ marginBottom: 20 }}>
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: "#111827", letterSpacing: "-0.02em" }}>
+          <h1
+            style={{
+              fontSize: 20,
+              fontWeight: 700,
+              color: "#111827",
+              letterSpacing: "-0.02em",
+            }}
+          >
             Timetable Builder
           </h1>
-          <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>
-            Drag subjects from the sidebar into the grid
+
+          <p
+            style={{
+              fontSize: 13,
+              color: "#6b7280",
+              marginTop: 6,
+            }}
+          >
+            Program: {programId?.slice(0, 8)}
+            {" • "}
+            Semester: {semester}
+            {" • "}
+            Section: {sectionId?.slice(0, 8)}
           </p>
         </div>
 

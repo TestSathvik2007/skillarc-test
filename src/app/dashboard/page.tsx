@@ -1,49 +1,42 @@
-import DashboardCard from "@/components/dashboard-card"
+import { redirect } from "next/navigation"
+import { createSupabaseServerClient } from "@/lib/supabase-server"
+import { ROLES } from "@/constants/roles"
+import { DASHBOARD_ROUTES } from "@/constants/routes"
 
-const font = "'Plus Jakarta Sans', 'DM Sans', sans-serif"
+export default async function DashboardPage() {
+  const supabase = await createSupabaseServerClient()
 
-export default function DashboardPage() {
-  return (
-    <div style={{
-      minHeight: "100vh",
-      backgroundColor: "#f4f5f7",
-      padding: 24,
-      fontFamily: font,
-    }}>
-      {/* Page header */}
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#111827", letterSpacing: "-0.02em", margin: 0 }}>
-          Dashboard
-        </h1>
-        <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>
-          Thursday, March 12, 2026
-        </p>
-      </div>
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect("/auth/login")
 
-      {/* Stat cards */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-        gap: 16,
-        marginBottom: 28,
-      }}>
-        <DashboardCard title="Total Courses" value="12" />
-        <DashboardCard title="Total Students" value="240" />
-        <DashboardCard title="Assignments Due" value="8" />
-        <DashboardCard title="Completion Rate" value="78%" />
-      </div>
+  const { data: profile } = await supabase
+    .from("users")
+    .select("role, institution_id, organization_id")
+    .eq("id", user.id)
+    .maybeSingle()
 
-      {/* Placeholder content area */}
-      <div style={{
-        backgroundColor: "#ffffff",
-        borderRadius: 16,
-        border: "1px solid #f3f4f6",
-        boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
-        padding: "20px 24px",
-      }}>
-        <p style={{ fontSize: 13, fontWeight: 700, color: "#111827", marginBottom: 4 }}>Recent Activity</p>
-        <p style={{ fontSize: 11, color: "#9ca3af" }}>Your recent course and assignment activity will appear here.</p>
-      </div>
-    </div>
-  )
+  const role = profile?.role
+
+  const roleRedirects: Record<string, string> = {
+    [ROLES.SUPER_ADMIN]:       DASHBOARD_ROUTES.SUPER_ADMIN,
+    [ROLES.ORG_ADMIN]:         DASHBOARD_ROUTES.ORG_ADMIN,
+    [ROLES.INSTITUTION_ADMIN]: DASHBOARD_ROUTES.INSTITUTION_ADMIN,
+    [ROLES.HOD]:               DASHBOARD_ROUTES.HOD,
+    [ROLES.PROGRAM_HEAD]:      DASHBOARD_ROUTES.PROGRAM_HEAD,
+    [ROLES.FACULTY]:           DASHBOARD_ROUTES.FACULTY,
+    [ROLES.STUDENT]:           DASHBOARD_ROUTES.STUDENT,
+    [ROLES.PARENT]:            DASHBOARD_ROUTES.PARENT,
+  }
+
+  const destination = role ? roleRedirects[role] : null
+
+  if (!destination) {
+    return (
+      <pre style={{ padding: "1rem", whiteSpace: "pre-wrap" }}>
+        {JSON.stringify({ userId: user.id, userEmail: user.email, profile, role }, null, 2)}
+      </pre>
+    )
+  }
+
+  redirect(destination)
 }

@@ -1,7 +1,9 @@
 "use client"
 
+import { useState } from "react"
 import { useDroppable } from "@dnd-kit/core"
 import { useTimetable } from "../context/timetable-context"
+import { supabase } from "@/lib/supabase"
 
 const COLORS: Record<string, { bg: string; border: string; text: string; sub: string }> = {
   DAA:    { bg: "#dbeafe", border: "#bfdbfe", text: "#1e3a5f", sub: "#3b82f6" },
@@ -16,11 +18,27 @@ const DEFAULT = { bg: "#dbeafe", border: "#bfdbfe", text: "#1e3a5f", sub: "#3b82
 
 export default function TimetableCell({ day, period }: { day: string; period: string }) {
   const { setNodeRef, isOver } = useDroppable({ id: `${day}-${period}` })
-  const { slots } = useTimetable()
+  const { slots, assignSubject } = useTimetable()
+  const [hovered, setHovered] = useState(false)
 
   const assigned = slots.find((s: any) => s.day === day && s.period === period)
-  const c = assigned ? (COLORS[assigned.subject.code] ?? DEFAULT) : DEFAULT
+  const c = assigned ? (COLORS[assigned.subject?.code] ?? DEFAULT) : DEFAULT
   const isLab = assigned?.subject?.type === "LAB"
+
+  async function handleClear() {
+    // Clear from UI immediately
+    assignSubject(day, period, undefined)
+
+    // Delete from Supabase
+    const { error } = await supabase
+      .from("timetable_slots")
+      .delete()
+      .eq("institution_id", process.env.NEXT_PUBLIC_INSTITUTION_ID)
+      .eq("day", day)
+      .eq("period", Number(period.replace("P", "")))
+
+    if (error) console.error("Failed to clear slot:", error.message)
+  }
 
   const emptyStyle = isOver
     ? { backgroundColor: "#eef2ff", borderColor: "#818cf8", borderStyle: "dashed" as const, borderWidth: 2, transform: "scale(1.02)" }
@@ -29,6 +47,8 @@ export default function TimetableCell({ day, period }: { day: string; period: st
   return (
     <div
       ref={setNodeRef}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         width: "100%",
         height: 80,
@@ -36,6 +56,7 @@ export default function TimetableCell({ day, period }: { day: string; period: st
         overflow: "hidden",
         transition: "all 0.15s ease",
         fontFamily: "'Plus Jakarta Sans', 'DM Sans', sans-serif",
+        position: "relative",
         ...(assigned
           ? { backgroundColor: c.bg, borderColor: c.border, borderStyle: "solid", borderWidth: 1, boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }
           : emptyStyle
@@ -43,33 +64,64 @@ export default function TimetableCell({ day, period }: { day: string; period: st
       }}
     >
       {assigned ? (
-        <div style={{ height: "100%", display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "8px 10px" }}>
-          <div>
-            <p style={{ fontWeight: 700, fontSize: 12, color: c.text, lineHeight: 1.2 }}>
-              {assigned.subject.code}
-            </p>
-            <p style={{ fontSize: 10, color: c.sub, marginTop: 2, lineHeight: 1.3 }}>
-              {assigned.subject.faculty}
-            </p>
+        <>
+          <div style={{ height: "100%", display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "8px 10px" }}>
+            <div>
+              <p style={{ fontWeight: 700, fontSize: 12, color: c.text, lineHeight: 1.2 }}>
+                {assigned.subject.code}
+              </p>
+              <p style={{ fontSize: 10, color: c.sub, marginTop: 2, lineHeight: 1.3 }}>
+                {assigned.subject.faculty_name ?? assigned.subject.faculty}
+              </p>
+            </div>
+            {isLab && (
+              <span style={{
+                display: "inline-block",
+                alignSelf: "flex-start",
+                padding: "1px 6px",
+                borderRadius: 5,
+                fontSize: 9,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                backgroundColor: "#ffedd5",
+                color: "#c2410c",
+                border: "1px solid #fed7aa",
+              }}>
+                LAB
+              </span>
+            )}
           </div>
-          {isLab && (
-            <span style={{
-              display: "inline-block",
-              alignSelf: "flex-start",
-              padding: "1px 6px",
-              borderRadius: 5,
-              fontSize: 9,
-              fontWeight: 700,
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              backgroundColor: "#ffedd5",
-              color: "#c2410c",
-              border: "1px solid #fed7aa",
-            }}>
-              LAB
-            </span>
+
+          {/* ✕ clear button — visible on hover */}
+          {hovered && (
+            <button
+              onClick={handleClear}
+              style={{
+                position: "absolute",
+                top: 5,
+                right: 5,
+                width: 18,
+                height: 18,
+                borderRadius: "50%",
+                backgroundColor: "#ef4444",
+                border: "none",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#ffffff",
+                fontSize: 11,
+                fontWeight: 700,
+                lineHeight: 1,
+                boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
+                zIndex: 10,
+              }}
+            >
+              ✕
+            </button>
           )}
-        </div>
+        </>
       ) : isOver ? (
         <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4 }}>
           <div style={{ width: 20, height: 20, borderRadius: "50%", backgroundColor: "#c7d2fe", display: "flex", alignItems: "center", justifyContent: "center" }}>
